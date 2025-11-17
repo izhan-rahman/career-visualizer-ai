@@ -1,42 +1,43 @@
 import os
 import base64
+import sys
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from google.oauth2 import service_account
 from google.cloud import speech
 import gspread
 from datetime import datetime
-import sys # Import sys for path checking
 
-# --- Configuration ---
-
-# Get the PythonAnywhere username, or default to an empty string
-# On your local PC, this will be empty. On the server, it will be 'IzhanRahman'
-PA_USERNAME = os.environ.get('USER', '')
-
+# --- Smart Path Configuration ---
+PA_USERNAME = os.environ.get('USER', '') 
 if PA_USERNAME:
-    # --- Production Path (on PythonAnywhere) ---
-    # This path will look like: /home/IzhanRahman/career-visualizer/google-creds.json
     CRED_FILE_PATH = f'/home/{PA_USERNAME}/career-visualizer/google-creds.json'
 else:
-    # --- Local Development Path (Your Windows PC) ---
-    # This looks for 'google-creds.json' in the *same* (server) folder as app.py
     CRED_FILE_PATH = os.path.join(os.path.dirname(__file__), 'google-creds.json')
+# ------------------------------
 
-# This is your Google Sheet ID
-SHEET_ID = '1rRWk0sSMs2N-Jc1WiaLO544p1KLUcN0ctRezN6lZjq8'
+SHEET_ID = '1FEuyfNKF4MuVXebcjyXX88TtJuHpClfqR_SRGFdkLBI' 
+SHEET_TAB_NAME = 'Sheet1' 
 
-# Your user database
+# --- Suhail is the Admin ---
 USERS = {
-    "admin@school.com": {"password": "password123", "role": "admin"},
+    "suhail@school.com": {"password": "SuhailsPassword123", "role": "admin"},
     "teacher1@school.com": {"password": "user123", "role": "user"},
     "teacher2@school.com": {"password": "user123", "role": "user"},
-    "teacher3@school.com": {"password": "user123", "role": "user"},
 }
 
 # --- App Setup ---
 app = Flask(__name__)
-CORS(app) # Allow requests from your Netlify app
+app.config['DEBUG'] = True 
+
+# --- CHANGE: Added your public client URL to the list ---
+CORS(app, resources={r"/*": {"origins": [
+    "http://localhost:3000", 
+    "http://localhost:3001",
+    "https://careervisualizer.netlify.app",
+    "https://4l619ljb-3001.inc1.devtunnels.ms"  # <-- This is the new line
+]}})
+# -----------------------------------------------------
 
 # --- Google API Setup ---
 SCOPES = [
@@ -44,20 +45,17 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive.file',
     'https://www.googleapis.com/auth/cloud-platform'
 ]
-
-# Load credentials from the file
 try:
     creds = service_account.Credentials.from_service_account_file(CRED_FILE_PATH, scopes=SCOPES)
     gc = gspread.authorize(creds)
     speech_client = speech.SpeechClient(credentials=creds)
-    sheet = gc.open_by_key(SHEET_ID).sheet1
-    print("--- Successfully connected to Google APIs ---", file=sys.stderr)
+    doc = gc.open_by_key(SHEET_ID)
+    sheet = doc.worksheet(SHEET_TAB_NAME) 
+    print("--- Successfully connected to Google APIs and found sheet tab ---", file=sys.stderr)
 except Exception as e:
-    print(f"!!! FAILED TO LOAD GOOGLE CREDS: {e} !!!", file=sys.stderr)
-    print(f"!!! Make sure '{CRED_FILE_PATH}' exists and is shared with your sheet !!!", file=sys.stderr)
+    print(f"!!! FAILED TO LOAD GOOGLE CREDS OR SHEET (Path: {CRED_FILE_PATH}): {e} !!!", file=sys.stderr)
 
-# --- API Endpoints ---
-
+# --- API Endpoints (unchanged) ---
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
@@ -77,12 +75,12 @@ def record():
     if not name or not career:
         return jsonify({"success": False, "message": "Missing name or career"}), 400
     try:
-        date = datetime.now().strftime('%d-%m-%Y')
-        sheet.append_row([name, career, date])
+        date = datetime.now().strftime('%d-%m-%Y') 
+        sheet.append_row([name, career, date]) 
         print(f"Record saved to Google Sheet: {name}, {career}, {date}", file=sys.stderr)
         return jsonify({"success": True, "message": "Record saved"})
     except Exception as e:
-        print(f"Failed to write to Google Sheet: {e}", file=sys.stderr)
+        print(f"---!!! Failed to write to Google Sheet: {e} !!!---", file=sys.stderr)
         return jsonify({"success": False, "message": "Failed to save record"}), 500
 
 @app.route('/transcribe', methods=['POST'])
@@ -102,15 +100,13 @@ def transcribe():
         )
         response = speech_client.recognize(config=config, audio=audio)
         if not response.results:
-            print("Google Speech AI returned no results.", file=sys.stderr)
             return jsonify({"success": False, "transcript": ""})
         transcript = response.results[0].alternatives[0].transcript
-        print(f"Google AI transcript: {transcript}", file=sys.stderr)
         return jsonify({"success": True, "transcript": transcript})
     except Exception as e:
         print(f"Google Speech-to-Text Error: {e}", file=sys.stderr)
         return jsonify({"success": False, "message": "Failed to transcribe audio"}), 500
 
 if __name__ == '__main__':
-    # This part is for local testing (python app.py)
+    print(" * Starting Flask server on http://localhost:5000")
     app.run(debug=True, port=5000)
