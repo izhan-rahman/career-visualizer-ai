@@ -1,4 +1,3 @@
-Set-Content -Path netlify.toml -Value @'
 [build]
   base = "client"
   publish = "build"
@@ -6,4 +5,3 @@ Set-Content -Path netlify.toml -Value @'
 
 [build.environment]
   NODE_VERSION = "18"
-'@
