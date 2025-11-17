@@ -1,9 +1,9 @@
+Set-Content -Path netlify.toml -Value @'
 [build]
-  command = "npm --prefix client run build"
-  publish = "client/build"
-
-[build.lifecycle]
-  preBuild = "npm --prefix client install"
+  base = "client"
+  publish = "build"
+  command = "npm run build"
 
 [build.environment]
   NODE_VERSION = "18"
+'@
