@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import LoginPage from './LoginPage';
 import { Camera, Mic, Play, Send, User, Briefcase, LogOut, ShieldCheck, ArrowLeft } from 'lucide-react';
@@ -32,8 +32,8 @@ function CareerVisualizerApp({ onLogout, role }) {
   const [careerImage, setCareerImage] = useState(null);
   const [listening, setListening] = useState(false);
 
-  // Your image list (unchanged)
-  const careerImages = {
+  // Memoize careerImages so reference is stable and hooks deps are satisfied
+  const careerImages = useMemo(() => ({
     actor: "/images/actor.jpeg", architect: "/images/architect.jpeg", artist: "/images/artist.jpeg",
     astronaut: "/images/astronaut.jpeg", athlete: "/images/athlete.jpeg", animator: "/images/animator.jpeg",
     baker: "/images/baker.jpeg", badmintonplayer: "/images/badmintonplayer.jpeg", barber: "/images/barber.jpeg",
@@ -55,33 +55,31 @@ function CareerVisualizerApp({ onLogout, role }) {
     socialworker: "/images/socialworker.jpeg", softwareengineer: "/images/softwareengineer.jpeg",
     soldier: "/images/soldier.jpeg", teacher: "/images/teacher.jpeg", veterinarian: "/images/veterinarian.jpeg",
     writer: "/images/writer.jpeg", youtuber: "/images/youtuber.jpeg",
-  };
+  }), []);
 
-  // --- This function now checks for the confused.jpeg fallback ---
+  // Now include careerImages in the deps so eslint is happy
   const getCareerData = useCallback((career) => {
-    const key = career.replace(/\s+/g, "").toLowerCase();
+    const key = (career || "").replace(/\s+/g, "").toLowerCase();
     const imagePath = careerImages[key];
 
     if (imagePath) {
-      // Success: Career is in our list
       return {
         title: `${name || 'Student'} wants to be a ${career}`,
         src: imagePath,
         isKnown: true
       };
     } else {
-      // Fallback: Career is not in our list
       return {
         title: `${name || 'Student'}, are you confused? Please ask your mentor for guidance.`,
-        src: '/images/confused.jpeg', // You MUST add this image to public/images
+        src: '/images/confused.jpeg',
         isKnown: false
       };
     }
-  }, [name]); // Dependency on 'name'
+  }, [name, careerImages]);
 
   const stableSaveRecord = useCallback(async (studentName, studentCareer) => {
     try {
-      await fetch(`${SERVER_URL}/record`, { // Use the URL
+      await fetch(`${SERVER_URL}/record`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: studentName, career: studentCareer }),
@@ -90,7 +88,7 @@ function CareerVisualizerApp({ onLogout, role }) {
     } catch (error) {
       console.error('Failed to send record:', error);
     }
-  }, []);
+  }, []); // SERVER_URL is a const at module scope
 
   const extractNameAndCareer = useCallback((text) => {
     let n = "", c = "";
@@ -105,15 +103,13 @@ function CareerVisualizerApp({ onLogout, role }) {
     return { name: n || "Student", career: c || null };
   }, []);
 
-  // --- This function now uses the fallback logic ---
   const processVoiceCommand = useCallback((transcript) => {
     const { name: dName, career: dCareer } = extractNameAndCareer(transcript);
-    setName(dName); // Set name here so getCareerData can use it
+    setName(dName);
     if (dCareer) {
-      const careerData = getCareerData(dCareer); // Get title, image, and isKnown
+      const careerData = getCareerData(dCareer);
       setCareerImage(careerData);
       setStage("result");
-      // Only save to Google Sheets if the career is known
       if (careerData.isKnown) {
         stableSaveRecord(dName, dCareer);
       }
@@ -128,7 +124,7 @@ function CareerVisualizerApp({ onLogout, role }) {
     reader.onloadend = async () => {
       const base64Audio = reader.result;
       try {
-        const response = await fetch(`${SERVER_URL}/transcribe`, { // Use the URL
+        const response = await fetch(`${SERVER_URL}/transcribe`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ audioData: base64Audio }),
@@ -143,7 +139,7 @@ function CareerVisualizerApp({ onLogout, role }) {
         setStage("manual");
       }
     };
-  }, [processVoiceCommand]); 
+  }, [processVoiceCommand]);
 
   const startVoiceRecognition = useCallback(async () => {
     if (!('MediaRecorder' in window)) {
@@ -172,7 +168,7 @@ function CareerVisualizerApp({ onLogout, role }) {
       alert("Could not access microphone. Please check permissions.");
       setStage("manual");
     }
-  }, [sendAudioToServer]); 
+  }, [sendAudioToServer]);
 
   const speak = useCallback((text) => {
     if (!('speechSynthesis' in window) || !text.trim()) { return; }
@@ -184,8 +180,8 @@ function CareerVisualizerApp({ onLogout, role }) {
     const setVoiceAndSpeak = () => {
       const voices = window.speechSynthesis.getVoices();
       const indianVoice = voices.find(v => v.lang === 'en-IN');
-      if (indianVoice) { 
-        utterance.voice = indianVoice; 
+      if (indianVoice) {
+        utterance.voice = indianVoice;
       }
       window.speechSynthesis.speak(utterance);
     }
@@ -208,7 +204,7 @@ function CareerVisualizerApp({ onLogout, role }) {
     let timer = null;
     const startCameraAndTimer = async () => {
       try {
-        speak(" "); 
+        speak(" ");
         stream = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -237,19 +233,17 @@ function CareerVisualizerApp({ onLogout, role }) {
     setStage("start"); setName(""); setCareer(""); setCareerImage(null);
   };
 
-  // --- This function now uses the fallback logic ---
   const handleManualSubmit = (e) => {
     e.preventDefault();
     const studentName = name || "Student";
     const studentCareer = career;
-    
-    setName(studentName); // Set name for getCareerData
-    
-    const careerData = getCareerData(studentCareer); 
+
+    setName(studentName);
+
+    const careerData = getCareerData(studentCareer);
     setCareerImage(careerData);
     setStage("result");
-    
-    // Only save if the career is known
+
     if (careerData.isKnown) {
       stableSaveRecord(studentName, studentCareer);
     }
@@ -258,7 +252,7 @@ function CareerVisualizerApp({ onLogout, role }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-800 via-indigo-900 to-blue-900 flex flex-col items-center justify-center p-4 relative overflow-hidden">
       <div className="absolute top-4 right-4 flex items-center gap-4 z-10">
-        
+
         {role === 'admin' && (
           <motion.button
             onClick={() => setStage('admin_panel')}
@@ -437,7 +431,6 @@ function CareerVisualizerApp({ onLogout, role }) {
     </div>
   );
 }
-
 
 // Main App component (handles login state)
 export default function App() {
