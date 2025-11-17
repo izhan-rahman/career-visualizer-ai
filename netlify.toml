@@ -3,7 +3,6 @@
   publish = "client/build"
 
 [build.lifecycle]
-  # Install dependencies INSIDE client before building
   preBuild = "npm --prefix client install"
 
 [build.environment]
