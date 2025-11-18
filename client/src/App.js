@@ -25,6 +25,7 @@ function CareerVisualizerApp({ onLogout, role }) {
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
+  const audioStreamRef = useRef(null); // To keep track of the audio stream
 
   const [stage, setStage] = useState("start");
   const [name, setName] = useState("");
@@ -147,14 +148,21 @@ function CareerVisualizerApp({ onLogout, role }) {
     }
     try {
       const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = audioStream; // Store the stream
       mediaRecorderRef.current = new MediaRecorder(audioStream, { mimeType: 'audio/webm;codecs=opus' });
       audioChunksRef.current = [];
-      mediaRecorderRef.current.ondataavailable = (event) => { audioChunksRef.current.push(event.data); };
+      mediaRecorderRef.current.ondataavailable = (event) => { 
+        if (event.data.size > 0) { // Only push if data exists
+          audioChunksRef.current.push(event.data); 
+        }
+      };
       mediaRecorderRef.current.onstop = () => {
         setListening(false);
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
         sendAudioToServer(audioBlob);
-        audioStream.getTracks().forEach(track => track.stop());
+        if (audioStreamRef.current) {
+          audioStreamRef.current.getTracks().forEach(track => track.stop());
+        }
       };
       mediaRecorderRef.current.start();
       setListening(true);
@@ -162,7 +170,7 @@ function CareerVisualizerApp({ onLogout, role }) {
         if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
           mediaRecorderRef.current.stop();
         }
-      }, 5000);
+      }, 10000); // Increased mic time to 10 seconds
     } catch (err) {
       console.error("Audio recording error:", err);
       alert("Could not access microphone. Please check permissions.");
@@ -230,6 +238,13 @@ function CareerVisualizerApp({ onLogout, role }) {
 
   const goBackToStart = () => {
     window.speechSynthesis.cancel();
+    // Stop any ongoing audio recording when going back to start
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.stop();
+    }
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => track.stop());
+    }
     setStage("start"); setName(""); setCareer(""); setCareerImage(null);
   };
 
@@ -315,10 +330,10 @@ function CareerVisualizerApp({ onLogout, role }) {
               <motion.div
                 key="camera_demo"
                 className="p-6 text-center"
-                 variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
+                variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
               >
-                  <p className="text-xl font-semibold mb-4 text-white text-opacity-90">Hello! Smile!</p>
-                  <video ref={videoRef} autoPlay playsInline muted className="rounded-lg shadow-lg w-full" />
+                <p className="text-xl font-semibold mb-4 text-white text-opacity-90">Hello! Smile!</p>
+                <video ref={videoRef} autoPlay playsInline muted className="rounded-lg shadow-lg w-full" />
               </motion.div>
             )}
 
@@ -326,21 +341,21 @@ function CareerVisualizerApp({ onLogout, role }) {
                <motion.div
                 key="listen"
                 className="p-8 text-center"
-                 variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
+                variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
                >
-                  <p className="text-xl font-medium mb-2 text-white text-opacity-90 flex items-center justify-center gap-2"><Mic size={24}/> What do you want to be?</p>
-                  <p className="text-sm text-white text-opacity-70 mb-4">e.g., "I want to be a doctor"</p>
-                  {listening && (
-                     <div className="flex justify-center items-center my-4">
+                 <p className="text-xl font-medium mb-2 text-white text-opacity-90 flex items-center justify-center gap-2"><Mic size={24}/> What do you want to be?</p>
+                 <p className="text-sm text-white text-opacity-70 mb-4">e.g., "I want to be a doctor"</p>
+                 {listening && (
+                    <div className="flex justify-center items-center my-4">
                        <motion.div
                          className="bg-red-500 w-8 h-8 rounded-full shadow-lg"
                          animate={{ scale: [1, 1.2, 1]}}
                          transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut"}}
                        />
                        <p className="ml-3 text-red-400 font-semibold">Recording Audio...</p>
-                     </div>
-                  )}
-              </motion.div>
+                    </div>
+                 )}
+               </motion.div>
             )}
 
             {stage === "manual" && (
@@ -348,26 +363,26 @@ function CareerVisualizerApp({ onLogout, role }) {
                 key="manual"
                 onSubmit={handleManualSubmit}
                 className="p-6 flex flex-col gap-6"
-                 variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
+                variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
               >
-                  <p className="text-center text-white text-opacity-90">Oops! Please type your career.</p>
-                  <div className="relative w-full flex items-center border-b-2 border-white border-opacity-30 focus-within:border-purple-400 transition-colors">
-                    <User size={20} className="text-white text-opacity-70 mr-3" />
-                    <input type="text" placeholder="Your name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="appearance-none w-full bg-transparent text-white placeholder-white placeholder-opacity-70 py-2 focus:outline-none text-lg" />
-                  </div>
-                  <div className="relative w-full flex items-center border-b-2 border-white border-opacity-30 focus-within:border-purple-400 transition-colors">
-                     <Briefcase size={20} className="text-white text-opacity-70 mr-3" />
-                     <input type="text" placeholder="Your dream career" value={career} onChange={(e) => setCareer(e.target.value)} required className="appearance-none w-full bg-transparent text-white placeholder-white placeholder-opacity-70 py-2 focus:outline-none text-lg" />
-                  </div>
-                  <motion.button
-                    type="submit"
-                    className="flex items-center justify-center gap-2 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xl font-semibold py-3 rounded-xl shadow-lg mt-4"
-                    whileHover={{ scale: 1.05, boxShadow: "0px 8px 20px rgba(0,0,0,0.3)" }}
-                    whileTap={{ scale: 0.95 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 10 }}
-                  >
-                    <Send size={20} /> Visualize!
-                  </motion.button>
+                <p className="text-center text-white text-opacity-90">Oops! Please type your career.</p>
+                <div className="relative w-full flex items-center border-b-2 border-white border-opacity-30 focus-within:border-purple-400 transition-colors">
+                  <User size={20} className="text-white text-opacity-70 mr-3" />
+                  <input type="text" placeholder="Your name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="appearance-none w-full bg-transparent text-white placeholder-white placeholder-opacity-70 py-2 focus:outline-none text-lg" />
+                </div>
+                <div className="relative w-full flex items-center border-b-2 border-white border-opacity-30 focus-within:border-purple-400 transition-colors">
+                  <Briefcase size={20} className="text-white text-opacity-70 mr-3" />
+                  <input type="text" placeholder="Your dream career" value={career} onChange={(e) => setCareer(e.target.value)} required className="appearance-none w-full bg-transparent text-white placeholder-white placeholder-opacity-70 py-2 focus:outline-none text-lg" />
+                </div>
+                <motion.button
+                  type="submit"
+                  className="flex items-center justify-center gap-2 w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white text-xl font-semibold py-3 rounded-xl shadow-lg mt-4"
+                  whileHover={{ scale: 1.05, boxShadow: "0px 8px 20px rgba(0,0,0,0.3)" }}
+                  whileTap={{ scale: 0.95 }}
+                  transition={{ type: "spring", stiffness: 400, damping: 10 }}
+                >
+                  <Send size={20} /> Visualize!
+                </motion.button>
               </motion.form>
             )}
 
@@ -375,7 +390,7 @@ function CareerVisualizerApp({ onLogout, role }) {
               <motion.div
                 key="result"
                 className="p-6 text-center"
-                 variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
+                variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
               >
                 <h2 className="text-3xl font-bold mb-4 text-white text-opacity-90 drop-shadow-md">{careerImage.title}</h2>
                 <motion.img
