@@ -23,15 +23,14 @@ const SERVER_URL = process.env.REACT_APP_SERVER_URL || 'http://localhost:5000';
 
 function CareerVisualizerApp({ onLogout, role }) {
   const videoRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const audioStreamRef = useRef(null); // To keep track of the audio stream
-
+  // Removed mediaRecorderRef, audioChunksRef, audioStreamRef as they are not needed for client-side SpeechRecognition
+  
   const [stage, setStage] = useState("start");
   const [name, setName] = useState("");
   const [career, setCareer] = useState("");
   const [careerImage, setCareerImage] = useState(null);
   const [listening, setListening] = useState(false);
+  const [recognition, setRecognition] = useState(null); // New state for SpeechRecognition
 
   // Memoize careerImages so reference is stable and hooks deps are satisfied
   const careerImages = useMemo(() => ({
@@ -58,7 +57,6 @@ function CareerVisualizerApp({ onLogout, role }) {
     writer: "/images/writer.jpeg", youtuber: "/images/youtuber.jpeg",
   }), []);
 
-  // Now include careerImages in the deps so eslint is happy
   const getCareerData = useCallback((career) => {
     const key = (career || "").replace(/\s+/g, "").toLowerCase();
     const imagePath = careerImages[key];
@@ -119,64 +117,53 @@ function CareerVisualizerApp({ onLogout, role }) {
     }
   }, [extractNameAndCareer, getCareerData, stableSaveRecord]);
 
-  const sendAudioToServer = useCallback(async (audioBlob) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(audioBlob);
-    reader.onloadend = async () => {
-      const base64Audio = reader.result;
-      try {
-        const response = await fetch(`${SERVER_URL}/transcribe`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ audioData: base64Audio }),
-        });
-        const data = await response.json();
-        if (data.success && data.transcript) {
-          processVoiceCommand(data.transcript.toLowerCase());
-        } else {
-          setStage("manual");
-        }
-      } catch (error) {
-        setStage("manual");
-      }
-    };
-  }, [processVoiceCommand]);
+  // Removed sendAudioToServer as transcription is now client-side
 
-  const startVoiceRecognition = useCallback(async () => {
-    if (!('MediaRecorder' in window)) {
-      console.error("MediaRecorder not supported"); setStage("manual"); return;
-    }
-    try {
-      const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = audioStream; // Store the stream
-      mediaRecorderRef.current = new MediaRecorder(audioStream, { mimeType: 'audio/webm;codecs=opus' });
-      audioChunksRef.current = [];
-      mediaRecorderRef.current.ondataavailable = (event) => { 
-        if (event.data.size > 0) { // Only push if data exists
-          audioChunksRef.current.push(event.data); 
-        }
-      };
-      mediaRecorderRef.current.onstop = () => {
-        setListening(false);
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm;codecs=opus' });
-        sendAudioToServer(audioBlob);
-        if (audioStreamRef.current) {
-          audioStreamRef.current.getTracks().forEach(track => track.stop());
-        }
-      };
-      mediaRecorderRef.current.start();
-      setListening(true);
-      setTimeout(() => {
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-          mediaRecorderRef.current.stop();
-        }
-      }, 10000); // Increased mic time to 10 seconds
-    } catch (err) {
-      console.error("Audio recording error:", err);
-      alert("Could not access microphone. Please check permissions.");
+  const startVoiceRecognition = useCallback(() => {
+    // Check for browser's SpeechRecognition API support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      console.error("Web Speech API (SpeechRecognition) not supported in this browser.");
+      alert("Speech recognition is not supported in your browser. Please use the manual input.");
       setStage("manual");
+      return;
     }
-  }, [sendAudioToServer]);
+
+    const newRecognition = new SpeechRecognition();
+    newRecognition.continuous = false; // Only get one result at a time
+    newRecognition.lang = 'en-IN'; // Set language to Indian English
+    newRecognition.interimResults = false; // Only return final results
+    newRecognition.maxAlternatives = 1; // Only get the most probable result
+
+    newRecognition.onstart = () => {
+      setListening(true);
+      console.log("Speech recognition started...");
+    };
+
+    newRecognition.onresult = (event) => {
+      setListening(false);
+      const transcript = event.results[0][0].transcript;
+      console.log("Transcript:", transcript);
+      processVoiceCommand(transcript.toLowerCase());
+    };
+
+    newRecognition.onerror = (event) => {
+      setListening(false);
+      console.error("Speech recognition error:", event.error);
+      alert(`Speech recognition failed: ${event.error}. Please try again or use manual input.`);
+      setStage("manual");
+    };
+
+    newRecognition.onend = () => {
+      setListening(false);
+      console.log("Speech recognition ended.");
+    };
+
+    setRecognition(newRecognition); // Store the recognition object
+    newRecognition.start();
+    setStage("listen"); // Move to listen stage immediately after starting recognition
+  }, [processVoiceCommand]);
 
   const speak = useCallback((text) => {
     if (!('speechSynthesis' in window) || !text.trim()) { return; }
@@ -212,7 +199,7 @@ function CareerVisualizerApp({ onLogout, role }) {
     let timer = null;
     const startCameraAndTimer = async () => {
       try {
-        speak(" ");
+        speak(" "); // Clear any pending speech
         stream = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -220,10 +207,12 @@ function CareerVisualizerApp({ onLogout, role }) {
         }
         timer = setTimeout(() => {
           if (stream) stream.getTracks().forEach(track => track.stop());
-          setStage('listen');
-          startVoiceRecognition();
+          // Directly start client-side voice recognition after camera demo
+          startVoiceRecognition(); 
         }, 3000);
       } catch (error) {
+        console.error("Camera access error:", error);
+        alert("Could not access camera. Please allow permissions.");
         setStage("start");
       }
     };
@@ -233,17 +222,18 @@ function CareerVisualizerApp({ onLogout, role }) {
     return () => {
       clearTimeout(timer);
       if (stream) stream.getTracks().forEach(track => track.stop());
+      // Stop recognition if going away from listen stage
+      if (recognition && listening) {
+        recognition.stop();
+      }
     };
-  }, [stage, startVoiceRecognition, speak]);
+  }, [stage, startVoiceRecognition, speak, listening, recognition]); // Added recognition and listening to deps
 
   const goBackToStart = () => {
     window.speechSynthesis.cancel();
-    // Stop any ongoing audio recording when going back to start
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-      mediaRecorderRef.current.stop();
-    }
-    if (audioStreamRef.current) {
-      audioStreamRef.current.getTracks().forEach(track => track.stop());
+    // Stop any ongoing SpeechRecognition when going back to start
+    if (recognition && listening) {
+      recognition.stop();
     }
     setStage("start"); setName(""); setCareer(""); setCareerImage(null);
   };
@@ -347,12 +337,12 @@ function CareerVisualizerApp({ onLogout, role }) {
                  <p className="text-sm text-white text-opacity-70 mb-4">e.g., "I want to be a doctor"</p>
                  {listening && (
                     <div className="flex justify-center items-center my-4">
-                       <motion.div
-                         className="bg-red-500 w-8 h-8 rounded-full shadow-lg"
-                         animate={{ scale: [1, 1.2, 1]}}
-                         transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut"}}
-                       />
-                       <p className="ml-3 text-red-400 font-semibold">Recording Audio...</p>
+                        <motion.div
+                          className="bg-red-500 w-8 h-8 rounded-full shadow-lg"
+                          animate={{ scale: [1, 1.2, 1]}}
+                          transition={{ duration: 0.8, repeat: Infinity, ease: "easeInOut"}}
+                        />
+                        <p className="ml-3 text-red-400 font-semibold">Listening...</p>
                     </div>
                  )}
                </motion.div>
