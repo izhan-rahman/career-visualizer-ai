@@ -112,7 +112,7 @@ function CareerVisualizerApp({ onLogout, role }) {
   }, []);
 
   const extractNameAndCareer = useCallback((text) => {
-    const cleanText = text.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g," ");
+    const cleanText = text.toLowerCase().replace(/[^a-z0-9\s]/g, "");
     let n = "";
     let c = "";
 
