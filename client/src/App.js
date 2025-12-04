@@ -16,9 +16,9 @@ const pageTransition = {
   duration: 0.5
 };
 
-// "Surprise" Animation for the Image
+// "Surprise" Animation for the Image Container
 const popInVariant = {
-  hidden: { scale: 0, opacity: 0, rotate: -15 },
+  hidden: { scale: 0, opacity: 0, rotate: -5 },
   visible: { 
     scale: 1, 
     opacity: 1, 
@@ -27,7 +27,7 @@ const popInVariant = {
       type: "spring", 
       stiffness: 260, 
       damping: 20, 
-      delay: 0.2 
+      delay: 0.1 
     }
   }
 };
@@ -81,7 +81,6 @@ function CareerVisualizerApp({ onLogout, role }) {
 
     const displayName = studentName || "Student";
     
-    // If we have an image, it's a known career
     if (imagePath) {
       return {
         title: `${displayName} wants to be a ${career}`,
@@ -89,7 +88,6 @@ function CareerVisualizerApp({ onLogout, role }) {
         isKnown: true
       };
     } else {
-      // If we DON'T have an image (but a career was detected), show confused state
       return {
         title: `${displayName}, are you confused? Please ask your mentor for guidance.`,
         src: '/images/confused.jpeg',
@@ -112,6 +110,7 @@ function CareerVisualizerApp({ onLogout, role }) {
   }, []);
 
   const extractNameAndCareer = useCallback((text) => {
+    // 1. Clean the text
     const cleanText = text.toLowerCase().replace(/[^a-z0-9\s]/g, "");
     let n = "";
     let c = "";
@@ -119,7 +118,6 @@ function CareerVisualizerApp({ onLogout, role }) {
     // --- 1. CAREER DETECTION ---
     const knownCareers = Object.keys(careerImages);
     
-    // Strategy A: Known Dictionary Match
     for (const careerKey of knownCareers) {
         const regex = new RegExp(`\\b${careerKey}\\b`, 'i');
         if (regex.test(cleanText)) {
@@ -128,27 +126,28 @@ function CareerVisualizerApp({ onLogout, role }) {
         }
     }
 
-    // Strategy B: Fallback for Unknown Professions (Fix for Point #1)
-    // If we didn't find a known career, look for the sentence structure "want to be a [SOMETHING]"
     if (!c) {
         const unknownCareerRegex = /(?:want to be|become|will be)\s+(?:a|an)\s+([a-z]+)/i;
         const match = cleanText.match(unknownCareerRegex);
         if (match && match[1]) {
-            const stopWords = ["doctor", "engineer"]; // avoid overwriting if somehow missed
+            const stopWords = ["doctor", "engineer", "good", "great"]; 
             if (!stopWords.includes(match[1])) {
-                c = match[1]; // Capture the unknown word (e.g., "paleontologist")
+                c = match[1]; 
             }
         }
     }
 
     // --- 2. NAME DETECTION ---
-    const nameRegex = /(?:my name is|i am|i'm|name is)\s+([a-z]+)/i;
+    const nameRegex = /(?:my name is|i am|i'm|name is|this is)\s+([a-z]+)/i;
     const match = cleanText.match(nameRegex);
     
     if (match && match[1]) {
         let potentialName = match[1];
-        const stopWords = ["a", "an", "the", "i", "and", "want", "going", "to", "become", "will"];
-        if (!stopWords.includes(potentialName)) {
+        potentialName = potentialName.replace(/my$/, "").replace(/and$/, "");
+
+        const stopWords = ["a", "an", "the", "i", "and", "want", "going", "to", "become", "will", "student"];
+        
+        if (!stopWords.includes(potentialName) && potentialName.length > 2) {
             n = potentialName;
         }
     }
@@ -164,14 +163,12 @@ function CareerVisualizerApp({ onLogout, role }) {
     if (dName) setName(dName);
     if (dCareer) setCareer(dCareer);
 
-    // If a career is detected (either known OR unknown), go to result
     if (dCareer) {
       const finalName = dName || name || "Student";
       const careerData = getCareerData(dCareer, finalName);
       setCareerImage(careerData);
       setStage("result");
       
-      // Only save to backend if it's a known career to keep data clean
       if (careerData.isKnown) {
         stableSaveRecord(finalName, dCareer);
       }
@@ -193,7 +190,7 @@ function CareerVisualizerApp({ onLogout, role }) {
     const newRecognition = new SpeechRecognition();
     newRecognition.continuous = true; 
     newRecognition.interimResults = true; 
-    newRecognition.lang = 'en-IN'; // Indian English accent
+    newRecognition.lang = 'en-IN'; 
 
     transcriptRef.current = ""; 
 
@@ -201,10 +198,18 @@ function CareerVisualizerApp({ onLogout, role }) {
       setListening(true);
       console.log("Speech recognition started...");
       
+      // --- STRICT 10 SECOND TIMER ---
+      // This forces the mic to stop and goes to fallback if nothing was found
+      if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
+      
       recognitionTimeoutRef.current = setTimeout(() => {
-          if (newRecognition) {
-              console.log("10s timeout reached, stopping.");
-              newRecognition.stop();
+          console.log("10s Strict Timeout - Force Stop");
+          newRecognition.stop(); 
+          setListening(false);
+          
+          // If we haven't found a valid transcript by now, force manual
+          if (!transcriptRef.current.trim()) {
+             setStage("manual");
           }
       }, 10000); 
     };
@@ -223,14 +228,15 @@ function CareerVisualizerApp({ onLogout, role }) {
       
       const currentFullTranscript = transcriptRef.current + finalTranscript + interimTranscript;
       
-      // Smart Early Stop
+      // Early stop check
       const check = extractNameAndCareer(currentFullTranscript);
-      // If we have a career (known or unknown) AND a name, stop early
-      if (check.name && check.career) {
-          console.log("Found both Name and Career! Stopping early.");
+      if (check.career && check.name) {
+          console.log("Found Name and Career! Stopping Early.");
           transcriptRef.current = currentFullTranscript; 
+          
           if (recognitionTimeoutRef.current) clearTimeout(recognitionTimeoutRef.current);
           newRecognition.stop(); 
+          setListening(false);
           return;
       }
       
@@ -240,9 +246,10 @@ function CareerVisualizerApp({ onLogout, role }) {
     };
 
     newRecognition.onerror = (event) => {
-      setListening(false);
-      clearTimeout(recognitionTimeoutRef.current);
       if (event.error !== 'no-speech') {
+          console.error("Speech Error:", event.error);
+          setListening(false);
+          clearTimeout(recognitionTimeoutRef.current);
           setStage("manual");
       }
     };
@@ -251,9 +258,10 @@ function CareerVisualizerApp({ onLogout, role }) {
       setListening(false);
       clearTimeout(recognitionTimeoutRef.current);
       
-      if (transcriptRef.current.trim()) {
+      if (transcriptRef.current && transcriptRef.current.trim().length > 0) {
           processVoiceCommand(transcriptRef.current.toLowerCase());
       } else {
+          // If the browser stopped on its own (silence) and we have no text, go to manual
           setStage("manual");
       }
     };
@@ -263,39 +271,30 @@ function CareerVisualizerApp({ onLogout, role }) {
     setStage("listen");
   }, [processVoiceCommand, extractNameAndCareer]);
 
-  // --- Fix for Point #2: Better, Happier Voice ---
   const speak = useCallback((text) => {
     if (!('speechSynthesis' in window) || !text.trim()) { return; }
-    
-    // Stop any current speech
     window.speechSynthesis.cancel();
     
     const utterance = new SpeechSynthesisUtterance(text);
-    
-    // 1. Voice Selection Logic
-    // We try to find high-quality "Natural" voices (common in Edge) first.
-    // If not found, we look for "Google" voices (common in Chrome).
     const voices = window.speechSynthesis.getVoices();
     
     const preferredVoice = voices.find(v => 
-        (v.name.includes("Natural") && v.name.includes("English")) || // Edge Natural
-        (v.name.includes("Google") && v.name.includes("English")) ||  // Chrome Google
-        (v.lang === 'en-IN' && !v.name.includes("Microsoft"))         // Fallback Indian
+        (v.name.includes("Natural") && v.name.includes("English")) || 
+        (v.name.includes("Google") && v.name.includes("English")) || 
+        (v.lang === 'en-IN' && !v.name.includes("Microsoft")) 
     );
 
     if (preferredVoice) {
         utterance.voice = preferredVoice;
     }
 
-    // 2. Emotional Tuning
-    utterance.rate = 1.0; // Normal speed (not too slow)
-    utterance.pitch = 1.2; // Slightly higher pitch = Cheerful/Happy
+    utterance.rate = 1.0; 
+    utterance.pitch = 1.2; 
     utterance.volume = 1.0; 
 
     window.speechSynthesis.speak(utterance);
   }, []);
 
-  // Ensure voices are loaded (sometimes they load async)
   useEffect(() => {
      window.speechSynthesis.getVoices();
   }, []);
@@ -482,7 +481,7 @@ function CareerVisualizerApp({ onLogout, role }) {
                 <p className="text-center text-white text-opacity-90">Oops! Please type your career.</p>
                 <div className="relative w-full flex items-center border-b-2 border-white border-opacity-30 focus-within:border-purple-400 transition-colors">
                   <User size={20} className="text-white text-opacity-70 mr-3" />
-                  <input type="text" placeholder="Your name (optional)" value={name} onChange={(e) => setName(e.target.value)} className="appearance-none w-full bg-transparent text-white placeholder-white placeholder-opacity-70 py-2 focus:outline-none text-lg" />
+                  <input required type="text" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} className="appearance-none w-full bg-transparent text-white placeholder-white placeholder-opacity-70 py-2 focus:outline-none text-lg" />
                 </div>
                 <div className="relative w-full flex items-center border-b-2 border-white border-opacity-30 focus-within:border-purple-400 transition-colors">
                   <Briefcase size={20} className="text-white text-opacity-70 mr-3" />
@@ -507,16 +506,15 @@ function CareerVisualizerApp({ onLogout, role }) {
                 variants={pageVariants} initial="initial" animate="in" exit="out" transition={pageTransition}
               >
                 <h2 className="text-3xl font-bold mb-4 text-white text-opacity-90 drop-shadow-md">
-                   {/* Clean title display */}
                    {careerImage.title}
                 </h2>
                 
-                {/* --- Surprise Animation on Image --- */}
+                {/* --- FIX 2: Fixed Square Container + Object Contain + Padding --- */}
                 <motion.div
                    variants={popInVariant}
                    initial="hidden"
                    animate="visible"
-                   className="relative"
+                   className="relative w-64 h-64 mb-6" 
                 >
                     <motion.div 
                        className="absolute -top-6 -right-6 text-yellow-400 z-10"
@@ -525,10 +523,20 @@ function CareerVisualizerApp({ onLogout, role }) {
                     >
                       <Sparkles size={40} fill="currentColor" />
                     </motion.div>
+
+                    <motion.div 
+                       className="absolute -bottom-6 -left-6 text-yellow-300 z-10"
+                       animate={{ rotate: -360, scale: [1, 1.3, 1] }}
+                       transition={{ duration: 2.5, repeat: Infinity }}
+                    >
+                      <Sparkles size={35} fill="currentColor" />
+                    </motion.div>
+
+                    {/* Image sits inside the box (contain) with padding so it's small & whole */}
                     <motion.img
                       src={careerImage.src}
                       alt={careerImage.title}
-                      className="rounded-lg shadow-lg w-full h-auto object-cover mb-6 border-4 border-white"
+                      className="w-full h-full object-contain p-4 rounded-lg shadow-lg border-4 border-white bg-white/5"
                     />
                 </motion.div>
 
